@@ -1,0 +1,112 @@
+---
+title: "Ridge regression prostate dataset"
+author: "Yusuf Tatlier"
+output: html_document
+---
+
+### Loading dataset, ols and subset selection
+
+```{r,message=FALSE}
+require(MASS)
+
+#Loading Prostate dataset: Note that using the Prostate dataset in R leads to different outcomes. I have loaded the dataset used for the analyses in the book.
+require(xlsx)
+setwd("C:/Users/Yusuf/Documents/dropbox")
+prostate_full<-read.xlsx("Prostate.xlsx", sheetName = "Sheet1")
+prostate<-prostate_full[,2:10]
+
+#Examine dataset
+head(prostate)
+summary(prostate)
+
+#Check correlation matrix
+print(cor(prostate))
+  #The book uses the test data, this can be obtained as follows
+prostate_train<-prostate_full[prostate_full$train=="T",2:10]
+cor(prostate_train)
+  #Obtain the training set
+prostate_test<-prostate_full[prostate_full$train=="F",2:10]
+
+#Make a correlogram
+require("psych")
+pairs.panels(prostate_train, 
+             method = "pearson", # correlation method
+             hist.col = "#00AFBB",
+             density = TRUE,  # show density plots
+             ellipses = TRUE # show correlation ellipses
+)
+
+#Linear regression using all variables.
+lm_fit<-lm(lpsa~.,data=prostate_train)
+
+#Let's examine performance on the test set
+lm_coefs<-coef(lm_fit)
+pt_set_train<-cbind(rep(1,nrow(prostate_train)),prostate_train[,1:(ncol(prostate_train)-1)])
+pt_set_test<-cbind(rep(1,nrow(prostate_test)),prostate_test[,1:(ncol(prostate_test)-1)])
+  #In ands out of sample predictions
+lm_train_pred<-as.matrix(pt_set_train)%*%lm_coefs
+lm_test_pred<-as.matrix(pt_set_test)%*%lm_coefs
+  #Can also be obtained as predict(lm_fit,prostate_test[1,1:8])
+  #Obtain the rmse
+require("Metrics")
+rmse_reg_train<-rmse(lm_train_pred,prostate_train$lpsa)
+rmse_reg_test<-rmse(lm_test_pred,prostate_test$lpsa)
+  #Note that the performance is logically worse on the test set as the model is less customized for this set   
+cat("Linear regression rmse for training set is",round(rmse_reg_train,6))
+cat("Linear regression rmse for test set is",round(rmse_reg_test,6))
+
+#(Forward) Subset selection based on AIC
+step(lm_fit) #Use the base step function
+AIC(step(lm_fit)) #Gives the AIC
+  #Packagae olsrr provides more tools for subset selection and making plots
+require("olsrr") 
+olsrr_subset_aic<-ols_step_forward_aic(lm_fit)
+olsrr_subset_aic
+plot(olsrr_subset_aic) #Note that the graph is flattening out as amount of variation explained by an additional covariate is decreasing.
+
+#Different measures can be used for subset selection, the following plot function gives this procedure for different measures.
+ols_subset_all <- ols_step_all_possible(lm_fit)
+plot(ols_subset_all) #Note: Will return multiple plot pages
+
+#We will not examine the performance on the test and training set
+```
+
+### Shrinkage methods: Ridge regression
+
+OLS provides unbiased estimates but variance of the estimates can be large, especially in high dimensions. Shrinkage methods on the other hand penalize model complexity, they
+will provide estimates with a larger bias but a lower variance. Depending on the bias-variance trade-off one could prefer these methods.
+
+Note that Ridge regression gives non-zero coeffcient estimates for all variables.
+
+```{r,message=FALSE}
+
+#Load package
+require(MASS)
+
+lambda <- seq(0,40,0.01)
+ridge_fit <- lm.ridge(lpsa~.,data=prostate_train,lam=lambda)
+
+#Making plots of the tracesrequire("broom")
+require("broom")
+require("ggplot2")
+tidy_ridge_fit<-tidy(ridge_fit)
+ggplot(tidy_ridge_fit, aes(lambda, estimate, color = term)) + geom_line()
+
+#Select optimal model
+ridge_sel<-select(ridge_fit)
+  #Note this can also be obtained as follows
+min_index_GCV<-which(ridge_fit$GCV==min(ridge_fit$GCV))
+opt_lambda<-ridge_fit$lambda[min_index_GCV]
+opt_coefs_ridge<-coef(ridge_fit)[opt_lambda,]
+
+#Check performance of this model on train and test set 
+ridge_train_pred<-as.matrix(pt_set_train)%*%opt_coefs_ridge
+ridge_test_pred<-as.matrix(pt_set_test)%*%opt_coefs_ridge
+  #Obtain the rmse
+rmse_ridge_train<-rmse(ridge_train_pred,prostate_train$lpsa)
+rmse_ridge_test<-rmse(ridge_test_pred,prostate_test$lpsa)
+cat("Ridge regression rmse for training set is",round(rmse_ridge_train,6))
+cat("Ridge regression rmse for test set is",round(rmse_ridge_test,6))
+
+#Ridge regression performs slightly worse on the training set and slighty better on the test set
+```

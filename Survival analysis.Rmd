@@ -1,0 +1,78 @@
+---
+title: "Survival Analysis"
+author: "Yusuf Tatlier"
+---
+
+## Survival Analysis
+
+Survival analysis is a branch of statistics that is concerned with the time until a 
+certain event (often some sort of failure event) occurs. It differs in this regard from 
+time-independent statistical methods, like logistic regression, as it does not solely
+look at whether an event occurs but also at the time. In this context, the survival function $s(t)$ specifies whether the event of interest has occured at time $t$.
+
+## Kaplan-Meier estimator and curve
+
+The Kaplan-Meier estimator provides a non-parametric estimate of the survival function.
+Suppose we are analyzing a certain population, where the size of the (active) population at time $n$ will be denoted by $x_n$. If we denote the fraction of failures at time $n$ by $d_n=\frac{x_n-x_{n+1}}{x_n}$, the Kaplan-Meier estimator for time $T$ is given by:
+$$ \prod_{n \leq T} (1-d_{n})$$
+The Kaplan-Meier curve is basically a line plot of all the estimators that are obtained in this way. As the data in practice will be discrete, the curve will be flat between points.
+Below we show an example.
+
+```{r,warning=FALSE,error=FALSE,message=FALSE}
+require(survival)
+
+#Use the kidney dataset in the package survival
+data(kidney)
+surv_fit<-survfit(Surv(time, status) ~ 1, data = kidney)
+#plot also shows the confidence interval
+plot(surv_fit,main="Kaplan-Meier curve kidney dataset")
+
+#It is also possible to compare the curve for different groups in the data separately using survfit
+surv_fit_groups<-survfit(Surv(time, status) ~ sex, data = kidney)
+plot(surv_fit_groups,col=2:3,main="Kaplan-Meier curves male/female groups kidney dataset")
+legend("topright", legend = c("male","female"),text.col = 2:3)
+
+#The plot indicates that the survival rates are different for men and women. We can also test
+#this statistically
+diff <- survdiff(Surv(time, status) ~ sex, data = lung)
+pvalue=1 - pchisq(diff$chisq, length(diff$n) - 1)
+#test shows a statistically significant difference
+pvalue 
+```
+
+## Cox proportional hazards model
+
+Given the hazard function $\lambda(t)$, which denotes the event rate at time $t$ conditional on survival until that time, the Cox proportional hazards model models the hazard function as follows:
+$$  \lambda(t)=\lambda_0(t)exp(\beta_1x_1+...+\beta_nx_n) $$
+Here $\lambda_0(t)$ is a base hazard function that is further scaled up or down per timestep depending on the covariates $x_1,...,x_n$ and coefficients $\beta_1,...,\beta_n$.
+Note that if we have two different groups with two different hazard functions $\lambda_a(t)$ and $\lambda_b(t)$, the proportion of the two hazard functions will be time-independent.
+
+```{r}
+#par(mfrow=c(2,1))
+
+#Univariate Cox model in which sex is used as covariate
+cox_fit_uni<-coxph(Surv(time, status) ~ sex, data = kidney)
+#plot also shows confidence interval
+fit_sex<-cox.zph(cox_fit_uni)
+#Note that the plot shows a clear slope, this is an indication that the sex covariate is statistically significant
+plot(fit_sex,main="Univariate Cox model")
+
+#Multivariate Cox model in which sex, age are used as covariate
+cox_fit_mult<-coxph(Surv(time, status) ~ sex+age, data = kidney)
+#plot also shows confidence interval
+fit_age_sex<-cox.zph(cox_fit_mult)
+plot(fit_age_sex,main="Multivariate Cox model")
+
+#Note that the age covariate is not significant, this can also be seen from the plot as the plot is quite flat and doesn't indicate a significant slope.
+print(cox_fit_mult)
+
+#We can perform statistical tests in order to see whether the difference between survival curves of different groups is statistically significant.
+#See below that for the covariate sex this is indeed the case. Note that a likelihood ratio
+#test, Wald test and logrank test are given, all of being highly significant
+summary(cox_fit_uni)
+```
+
+## Main References
+
+* Survival analysis in R for Public Health, Imperial College London
+* 'Survival' package in R (version 3.1-12), Terry M Therneau 

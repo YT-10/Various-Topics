@@ -1,0 +1,377 @@
+---
+title: "Generalized Linear Models (GLM)"
+author: "Yusuf Tatlier"
+output: html_document
+---
+
+In GLMs, the response variable $Y$ is assumed to have been distributed from a distribution in the expontential family, the mean of the distribution $\mu$ is related to the systematic component through a link function $g$, i.e. it holds that $g(\mu)=X\beta$. Here $\mu=EY$, $X$ is a matrix with the explanatory variables, while $\beta$ is a vector of the corresponding coefficients.  
+
+## Logistic regression
+
+Logistic regression is a GLM that is commonly used to model probabilities, here the response variable $Y$ is a Bernoulli random variable with parameter $p$. Note that this parameter also gives the expectation of the Bernoulli distribution. The link function is the logit function $g(p)=log\left(\frac{p}{(1-p)}\right)$, note this is the ratio of the probability of an event occuring and not-occuring. This ratio is known as the odds and the mean of the response variable can be expressed in the systematic component by taking the exponential of this expression and doing some manipulation. In total the glm is decribed by the following relationship:
+$$ p = \frac{exp(X\beta)}{1+exp(X\beta)}$$
+
+Before working with actual data, we will generate data for a logistic regression.
+
+```{r,warning=FALSE,message=FALSE}
+set.seed(1001)
+x = rnorm(250)
+z = 1 + 3.2*x #Generate systematic component
+
+#The logit function (p/(1-p)) provides odds for an event occuring, when p increases this ratio also increases. The logit function can be inverted in order to express the mean (p) in terms of the systematic component.
+
+p = 1/(1+exp(-z))  #Note that the event of success follows a Bernoulli distribution. The response variable (y) can then be generated using the obtained mean p.
+y = rbinom(250,1,p) 
+
+df=data.frame(y,x)
+glm_logistic<-glm(y~x,family="binomial",data=df)
+
+predictions<-ifelse(predict(glm_logistic)>0.5,1,0)
+table(y,predictions)
+```
+
+Note that the above step provide a general approach for generating data for all GLMs. First the mean of the response variable needs to be generated using the systematic component, subsequently the response variable can be generated.
+
+Now we will look at actual data, we will load the Default data:
+
+```{r,warning=FALSE,message=FALSE}
+#Load necessary packages
+require("ISLR")
+require("AER")
+data(Default)
+head(Default)
+str(Default)
+```
+
+We construct a model in which the explanatory variable is categorical with two levels using the 'student' variable:
+
+```{r}
+#Fit the logistic model
+xtabs(~default+student,data=Default)
+logistic<- glm(default ~ student, data=Default, family="binomial")
+summary(logistic)
+
+# Intercept is given by 0.405=log(206/6850) as female is lowest level for the student variable. 
+# The increment for male students is given by -3.504=log((127/2817)/(206/6850)).
+
+intercept<-as.numeric(coef(logistic)[1])
+student_inc<-as.numeric(coef(logistic)[2])
+
+prob_11 = 206/(206+6850)
+prob_est_11 = exp(intercept)/(1+exp(intercept))
+print((prob_est_11-prob_11)/prob_11) # The probability of a non-default female student is given by prob_11 based on the data and is approximated by prob_est_11.
+prob_22 = 127/(2817+127)
+prob_est_22 = exp(intercept+student_inc)/(1+exp(intercept+student_inc))
+print((prob_est_22-prob_22)/prob_22)
+# The probability of a default male student is given by prob_22 and is approximated by prob_est_22.
+
+```
+
+```{r}
+#Split data into training and test data
+training_data<-Default[1:9500,]
+test_data<-Default[9500:10000,]
+logistic_train<- glm(default ~ ., data=training_data, family="binomial")
+summary(logistic_train)
+
+#Make predictions on the training set 
+pred_logistic_train<-predict(logistic_train,training_data)
+df_train<-data.frame(log_value=pred_logistic_train,prob=exp(pred_logistic_train)/(1+exp(pred_logistic_train)),default_pred=rep("No",9500))
+levels(df_train$default_pred)=c("No","Yes")
+df_train$default_pred[df_train$prob>0.5]="Yes"
+#Alternative approach would be df_train$default_pred<-ifelse(df_train$prob>0.5,"Yes","No")
+df_train_sorted<-df_train[order(df_train$prob,decreasing = FALSE),]
+plot(df_train_sorted$log_value,df_train_sorted$prob,col=df_train_sorted$default_pred,xlab="syst component",ylab="prob",main="logistic regression training set")
+
+#Make predictions on the test set
+pred_logistic_test<-predict(logistic_train,test_data)
+df_test<-data.frame(log_value=pred_logistic_test,prob=exp(pred_logistic_test)/(1+exp(pred_logistic_test)),default_pred=rep("No",501),default=test_data$default)
+levels(df_test$default_pred)=c("No","Yes")
+df_test$default_pred[df_test$prob>0.5]="Yes"
+
+#Construct a table and look at the percentage of correct predictions
+log_pred_table<-table(df_test$default_pred,df_test$default)
+print(log_pred_table)
+cat((round((log_pred_table[1,1]+log_pred_table[2,2])/sum(log_pred_table)*100,2)),"% of the predictions were correct on the test set")
+```
+
+### GOF tests
+
+Above we have looked at the performance of the logistic regression model on the testset. We can also apply (Goodness Of Fit) GOF tests, which we will show below. In GLMs the deviance statistic is used as a GOF measure and less straightforward than the coefficient of determination as used in the context of OLS. More specifically the scaled deviance is -2 times the log of the likelihood ratio, i.e. if we have the log likelihood of the full/saturated model (this is a model which contains one coefficient for every observation) denoted by $l_s$ and the log likelihood of the proposed model $l_{pr}$, the scaled deviance $D_s$ is given by $-2(l_{pr}-l_s)$. It can be shown that the scaled deviance asymptotically follows a chi-squared distribution with $(n-k-1)$ degrees of freedom, for $n$ and $k$ being the numbers of parameters in the saturated and proposed models respectively. 
+
+More generally the result that $-2(l_{pr}-l_s)$ converges to a chi-squared distribution holds for all nested models (i.e. it holds for all cases in which $l_{pr}$ is a submodel of $l_s$) and is known as Wilks theorem. This means that also -2 times the ratio between the log of the likelihood ratio of the proposed and null model follows a chi-squared distribution. More specifically if we denote the log likelihood of the null model by $l_n$, then $-2(l_n-l_{pr})$ follows a chi-squared distribution with $k$ degrees of freedom (which is the number of covariates). This quantity is very useful as it indicates whether the addition of one or more covariates is significant.
+
+The null hypothesis in case of deviance tests is that the (simpler) model is correctly specified. In case one compares two models, this means that the null hypothesis needs to be rejected to show that the extensive model is (more) adequate. The test involving differences in deviance is generally more accurate than the GOF test involving a single deviance.
+
+```{r}
+#Look at null, full and proposed model fits
+logis_null<- glm(default ~ 1, data=Default, family="binomial")
+logis_full<- glm(default ~ ., data=Default, family="binomial")
+logis_prop<- glm(default ~ student, data=Default, family="binomial")
+
+#Look at the deviance
+logis_null_dev <- logis_null$deviance
+logis_full_dev <- logis_full$deviance
+logis_prop_dev <- logis_prop$deviance
+  #Note that the null deviance can also be obtained as follows
+logis_prop$null.deviance
+
+#Look at the anova table and deviance statistic
+anova(logis_null,logis_prop)
+  #We can calculate the deviance statistics as follows
+print(-2*(as.numeric(logLik(logis_null))-as.numeric(logLik(logis_prop))))
+  #Check whether the 'student' variable is significant
+1-pchisq(11.967,1)
+  #Compare with outcomes of the likelihood ratio test
+require("mdscore")
+lr.test(logis_null,logis_prop)
+
+#We can also calculate the log likelihood
+  #First calculate for first datarow
+lf_pred<-predict(logis_full,Default[1,]) #This is the systematic component
+print(exp(lf_pred)/(1+exp(lf_pred))) #This gives the mean estimate
+  #Convert response to 1s and 0s
+y<-ifelse(Default[,1]=="Yes",1,0) 
+  #Perform glm on the full dataset
+logis_full<- glm(default ~ ., data=Default, family="binomial")
+
+#Note that it is recommended to calculate the log-likelihood directly instead of calculating the likelihood and taking the log over this quantity. The reason is that R will eventually round the likelihood to zero as it becomes smaller and smaller. For the Default dataset this happened somewhere after 9000 datapoints.
+loglikel<-0
+for(i in 1:nrow(Default)){
+  #lf_pred<-predict(logis_full,Default[i,])
+  #p<-exp(lf_pred)/(1+exp(lf_pred))
+  p<-predict(logis_full,Default[i,],type="response")
+  loglikel_i<-log((p^y[i])*((1-p)^(1-y[i])))
+  #print(likel_i)
+  loglikel<-loglikel+loglikel_i
+}
+
+cat("Log-likelihood by R function logLik:",logLik(logis_full))
+cat("Log-likelihood as calculated above: ",loglikel)
+```
+
+Another GOF test is the Pearson $X^2$ statistic, which is quite intuitive as it looks at the scaled differnce between the observed counts $O_i$ and expected counts $E_i$:
+$$  X^2=\sum_{i=1}^{n}\frac{(O_i-E_i)^2}{E_i}$$
+In case of the logistic regression this quantity can be shown to resemble the RSS by rewriting the sum using 
+
+## Poisson regression
+
+Poisson regression is used to model count data, in this case the link function is the log function, it is therefore also called a log-linear model. Due to this log link it yields a multiplicative exponential model for the mean with a variance around the mean that equals the mean (i.e. heteroskedastic model). Generating count data and applying a poisson regression provides a nice way to get a good understanding of this regression technique.
+
+```{r,warning=FALSE}
+x = seq(0,6,0.025)
+z = 1 + 0.32*x #systematic component
+mu = exp(z) #apply log link to determine mean
+y = rpois(length(x),mu) #Bringing everything together
+
+#Fit a poisson GLM
+df=data.frame(y,x)
+glm_poisson<-glm(y~x,family="poisson",data=df)
+summary(glm_poisson)
+
+#Make a plot of the fit
+df_x<-data.frame(rep(1,length(x)),x)
+plot(x,y,main="Plot poisson regression mean")
+lines(x,predict(glm_poisson,df_x,type="response"),col="red")
+```
+
+Below we will generate data according to a multiplicative model of the form $E(Y_{i,j})=\mu \alpha_i \beta_j$ where $i$ and $j$ are the indices which are the rows and columns and the below example.
+
+```{r,warning=FALSE}
+i=as.factor(c(1,1,2,2)) 
+j=as.factor(c(1,2,1,2))
+
+alpha=c(1.2,1.6) #row factors
+beta=c(2.8,2.4) #column factors
+mu=0.3
+gen_data=matrix(,2,2)
+
+#Generate the data
+gen_data=0.3*alpha%*%t(beta)
+
+pois_mod<-glm(c(gen_data)~i+j,fam=poisson(link=log))
+
+#We calculate the estimates
+#Can also be calculated as exp(predict(pois_mod))
+gen_00_est=as.numeric(exp(coef(pois_mod)[1]))
+gen_10_est=as.numeric(exp(coef(pois_mod)[1]+coef(pois_mod)[2]))
+gen_01_est=as.numeric(exp(coef(pois_mod)[1]+coef(pois_mod)[3]))
+gen_11_est=as.numeric(exp(coef(pois_mod)[1]+coef(pois_mod)[2]+coef(pois_mod)[3]))
+
+model_table<-matrix(c(gen_00_est,gen_01_est,gen_10_est,gen_11_est),2,2)
+
+#Generated data
+print(gen_data)
+
+#Estimated data
+print(model_table)
+
+#The fit is very good as can be seen from the table and the deviance of the model
+print(pois_mod$deviance)
+
+#Now look at the fit with a linear regression
+lm_mod<-lm(c(gen_data)~i+j)
+
+#Look at the OLS estimates, which lead to higher errors in the predictions
+predict(lm_mod)
+sum((c(gen_data)-predict(lm_mod))^2)
+```
+
+## Application: Chain Ladder method and GLM
+
+GLMs are used in non-life insurance for claim reserving in IBNR models. To give some background, claims arising within a certain year will not be finalized in that year and the total claim amount might become known only after many years. For modeling purposes it is therefore administrated what the origin year of a claim is as well as how it develops towards the future. This is done in a so-called run-off triangle.
+
+We are interested in how the claims develop towards the future. Historically the (deterministic) chain ladder method was used in order to make this projection by assuming that claims over development years is proportional. GLMs can however also be used for this purpose, for example by using the origin and development years as covariates. Below we will give an example.
+
+It of course depends on the type of data in the run-off triangle what kind of link function should be chosen. In case of frequency/count data the log-link (poisson regression) is used. The individual and total claim size however require asymmetric distributions with a fat right tail (as should be expected for compound poisson distributions). The Tweedy distribution is for example used for modeling the total claim amount. Below we will only look at the claim frequency.
+
+The (non-stochastic) Chain Ladder model estimations coincide with the (stochastic) poisson regression estimates. They additionally emit the marginal totals property which means that the total number of claims per row for the data and model coincide.
+
+```{r,warning=FALSE,message=FALSE}
+require("ChainLadder")
+
+#load data
+data("MW2008")
+CL_data<-MW2008
+n<-ncol(CL_data)
+
+#plot data
+plot(CL_data)
+
+#Make cumulative development years now incremental
+inc_CL_data <- cum2incr(CL_data)
+
+#Development factors: Note that this is applied to cumulative data(!)
+dev_factors<-c()
+for(i in 1:(n-1)){
+  dev_factors<-c(dev_factors,sum(CL_data[c(1:(n-i)),(i+1)])/sum(CL_data[c(1:(n-i)),i]))
+}
+
+#Completing cumulative loss triangle using development factors
+cop_CL_data=CL_data
+
+for(i in 2:n){
+    cop_CL_data[c(((n+2)-i):n),i]=dev_factors[i-1]*cop_CL_data[c(((n+2)-i):n),(i-1)]
+}
+
+#Note that this result can also be obtained with the ChainLadder library using 
+mack<-MackChainLadder(CL_data)
+mack$FullTriangle
+
+#Package contains an informative plot function
+plot(mack)
+
+#As we know the ChainLadder approach estimations coincides with the Marginal Totals approach and poisson GLM estimations. Compare the outcomes of a GLM therefore with earlier results.
+#Note here that the glmReserve() function requires the cumulative dataset
+glm_fit_1<-glmReserve(CL_data)
+summary(glm_fit_1,type="model")
+
+#This would give an error: summary(glmReserve(inc_CL_data),type="model")
+
+
+#We can show that using the GLM function directly we can also obtain these coefficients
+#Note that this requires the incremental dataset (can be confusing with GLM)
+vec_CL_data<-as.vector(na.omit(as.vector(inc_CL_data)))
+col<-rep(1:n,n:1)
+row<-sequence(n:1)
+glm_fit_2 <- glm(vec_CL_data~as.factor(row)+as.factor(col), family=poisson)
+glm_fit_2_coef<-coef(glm_fit_2)
+print(glm_fit_2_coef)
+
+#Based on the glm coefficients we can fill the triangle
+exp_coef <- exp(glm_fit_2_coef)
+alpha <- exp_coef[1] * c(1, exp_coef[2:n])
+beta <- c(1, exp_coef[(n+1):(2*n-1)])
+triangle_2_inc <- alpha %*% t(beta)
+triangle_2<-t(apply(triangle_2_inc,1,cumsum))
+
+#glmReserve can also construct the full triangle but does this differently as it leaves realizations unchanged.
+triangle_1<-glm_fit_1$FullTriangle
+print(triangle_1)
+
+#We can check how well the model fits the data, for example for the first origin year
+plot(CL_data[1,],type="l",col="red",main="GLM (log-link) for first origin year",xlab="Development year numbers",ylab="Number of claims")
+lines(triangle_2[1,],type="l")
+
+#Note that the Marginal Totals property holds, i.e. totals add up
+  #This gives the sum of the total incurred claims per origin year
+for(i in 1:n){
+  print(CL_data[i,((n+1)-i)])
+}
+  #Compare with the number of claims given by the fit
+for(i in 1:n){
+  print(as.numeric(triangle_2[i,((n+1)-i)]))
+}
+
+```
+
+## Generalized Additive Models (GAM)
+
+GLMs are a generalization of OLS as we have seen in which a smooth function of a distribution (from the expontential family) is expressed in a linear systematic component.
+We could further generalize the framework by smoothening the covariates.
+
+(TO BE COMPLETED)
+
+
+```{r,warning=FALSE,message=FALSE}
+set.seed(1001)
+n=500
+x1<-seq(0,4,length.out=n)
+x2<-seq(0,6,length.out=n)
+
+y<-(-0.2*exp(x1))+3.2*cos(x2)+(x2/6)+rnorm(n)
+  
+x1<-1.3*x+rnorm(length(x),0,3)+0.5*(x^2)
+x2<-3.2*cos(x)+rnorm(length(x),0,x/3)+(x/6)
+y<-1+2.4*x1+3.6*x2+rnorm(length(x))
+lm_fit<-lm(y~x1+x2)
+
+#Make plot
+plot(y)
+abline(lm_fit,col="red")
+```
+
+## Mixed Models
+
+Until now we have look at fixed effects in regression, i.e. it was assumed that if data on the regressors was re-collected or re-sampled we would obtain the same outcomes. In practice one can encounter random effects, in which this is not the case. One situation in which exclusion of random effects can lead to wrong inferences is in the case of hierarchical data as we will discuss below.
+Suppose that the regressor we are examining contains various sub-groups. A textbook example is a health indicator that is measured with different patients. Suppose now that this indicator is measured by different doctors and it turns out they use a different measurement method and it is quite plausible that this affects the measurements. In this case a re-measuring this indicator is quite certain to lead to different outcomes and a model based on only fixed effects doesn't take this into account.
+Mixed models are called this way as they consider both fixed and random effects. These models have the following form:
+$$  Y=X\beta+Zu+\epsilon$$
+Here the dependent variable is given by $Y$, while the design matrices for fixed and random effects are given by $X$ and $Z$ respecively with $\beta$ and $u$ being the corresponding coefficient vectors. It is generally assumed that $u$ follows a (multivariate) normal distribution with a zero mean.
+Below we will first construct an example in which    
+
+```{r}
+#Load the required package
+require("lme4")
+
+#Assume four doctors that examine ten patients, mean=0, sd=5
+set.seed(1001)
+patient_fct<-as.factor(rep(1:10,each=4))
+patient_ind<-rep(rnorm(10,mean=0,sd=5),each=4)
+gender<-as.factor(rep(c(0,1,1,1),each=10)) #Add gender as variable that is not related to the sub-groups
+set.seed(1002)
+eps<-rnorm(40)
+y<-80+patient_ind+eps
+
+#Make a plot to see different levels for subgroups
+plot(y)
+
+#Make a fit for only fixed effects and mixed (fixed+random) effects
+fixed_fit<-lm(y~1)
+mixed_fit<-lmer(y~gender+(1|patient_fct))
+
+#Note that in case of mixed effects we get a larger std. error as this model also accounts for the variation between the subgroups.
+summary(fixed_fit)
+summary(mixed_fit)
+
+#Looking at the coefficients shows that we have a different intercept coefficient per subgroup. Notice that the gender_1 coefficient stays the same as it doesn't impact the subgroups.
+coef(mixed_fit)
+```
+
+
+## Main References
+
+- Elements of statistical learning (2nd edition), T Hastie et al, 2016
+- Claims reserving with R: ChainLadder-0.2.11 package vignette, A Carrato et al, 2020
+- Modern actuarial risk theory: Using R (2nd edition), R Kaas et al, 2008
+- R BGU Course, J Rosenblatt, 2019

@@ -1,0 +1,780 @@
+---
+title: "Regression tutorial"
+author: "Yusuf Tatlier"
+output: html_document
+---
+
+Goal of regression is to explain the the variation in the dependent variable y (also known as the response), by the variation in one or multiple independent variables (also known as the explanatory variable/covariate/regressor).
+
+The main idea that we use in this tutorial is that we generate our own data and then use regression to estimate the (by construction known) coefficients of the regression. This approach enables us to see whether our estimations are accurate and what issues arise.
+
+## Simple Linear Regression
+
+```{r,warning=FALSE,message=FALSE}
+require(moments)
+
+set.seed(1001)
+x<-seq(0,10,0.025)
+y<-1.2+2.4*x+rnorm(length(x))
+slr<-lm(y~x)
+summary(slr) #Note variable is highly significant
+coef_1<-coef(summary(slr))[1]
+coef_2<-coef(summary(slr))[2]
+coef(summary(slr))[2,]  #Also provides standard error, t statistic and p value  
+
+plot(x,y)
+abline(slr,col="red")
+
+#Plotting residuals
+hist(slr$residuals,breaks = 50, main="residuals")
+
+#Testing on normality: Both tests don't reject the null hypothesis of normality
+require("moments")
+jarque.test(slr$residuals)
+shapiro.test(slr$residuals)
+
+#Estimate variance
+sd(slr$residuals)
+
+#You can also use:
+require(fitdistrplus)
+norm_fit<-fitdist(slr$residuals,"norm")
+print(norm_fit)
+
+#The package has some plotting tools
+plot(norm_fit)
+
+#Ideally the  residuals should follow a normal distribution around zero as this indicates the model contains all information present in the data, this should especially hold for a larger dataset on which the model is fitted. If this is not the case, it is advisable to evaluate the model and possibly add some components.
+
+cat("b estimator can also be obtained as:",cov(x,y)/var(x))
+cat("a estimator can also be obtained as:",mean(y)-(cov(x,y)/var(x))*mean(x))
+
+cat("b has a normal distribution with variance:",cov(x,y)/var(x))
+cat("Coeffcient of determination is given by:",summary(slr)$r.squared)
+cat("Adjusted coeffcient of determination is given by:",summary(slr)$adj.r.squared) #Same as only one explanatory variable is present
+
+#The following expressions give the same outcomes
+1-cor(summary(slr)$residuals,y)^2
+summary(slr)$r.squared
+
+```
+
+A different way to look at the fit of the data is an analysis of variance analsis (ANOVA). This analysis shows how much variation is explained by the introduction of an explanatory variable.
+
+```{r}
+sum((y-mean(y))^2)
+anova(slr)
+paste("The explanatory variable explains",round((anova(slr)[1,2]-anova(slr)[2,2])/anova(slr)[1,2],2)*100,"% of the variation in the variable y")
+
+#In the context of GLMs we will encounter the deviance as a GOF measure. In the OLS context this measure reduces down to the SSR as can be seen below. This means the R function 'deviance' can be used to obtain this information directly.
+#Compare the following expressions
+sum(slr$residuals^2)
+deviance(slr)
+
+#The deviance can also be used to estimate the variance of the residuals
+ sqrt(deviance (slr) / df.residual (slr))
+```
+Regressions can be seen as a varying distribution around a certain mean, which is the regression line. Look for example at the simple example of a regression with one dummy predictor.
+
+```{r}
+#Generate data
+set.seed(1001)
+weight_men<-rnorm(100,80,12)
+weight_women<-rnorm(100,65,8)
+df_men<-data.frame(weight=weight_men,ind=1)
+df_women<-data.frame(weight=weight_women,ind=0)
+
+#Rbind the two datasets
+df_weight<-rbind(df_men,df_women) 
+
+par(mfrow=c(1,2))
+hist(df_weight[df_weight$ind==1,]$weight,breaks=25,main="(Generated) Male weight ditribution",xlab="weight")
+hist(df_weight[df_weight$ind==0,]$weight,breaks=25,main="(Generated) Female weight ditribution",xlab="weight")
+
+weight_mod<-lm(weight~ind,data=df_weight)
+summary(weight_mod)
+#Note that the difference in the mean weights is given by the coefficient ind.
+#The OLS will not yield the sds of both classes as it assumes homogeneity, however note that the residual standard error lies between the sd of both classes.
+```
+
+
+## Multiple linear regression
+
+```{r}
+set.seed(1001)
+mlr_reg_1<-seq(0,10,0.025)
+mlr_reg_2<-seq(0,40,0.1)+rnorm(401,0,5)
+mlr_res<-3+4*mlr_reg_1+1.2*mlr_reg_2+rnorm(length(mlr_reg_1))
+mlr<-lm(mlr_res~mlr_reg_1+mlr_reg_2)
+
+cat("Coeffcient of determination is given by:",summary(slr)$r.squared)
+cat("Adjusted coeffcient of determination is given by:",summary(slr)$adj.r.squared)
+
+anova(mlr)
+```
+
+## Linear regression with a dummy term. 
+
+We show a regression with a dummy term.
+
+```{r}
+#Generate a dummy variable
+x<-seq(0,1,1/400)+rnorm(401,0,0.2)
+dummy_sec<-ifelse(x<0.5,0,2)
+#Add to dependent variable
+y<-1.2+2.4*x+dummy_sec+rnorm(401,0.3)
+
+#linear regression
+dlr<-lm(y~x+factor(dummy_sec))
+summary(dlr)
+```
+
+##Interaction terms 
+
+In some cases there will be interaction terms between covariates, below it is shown how the coeffcients can be estimated in these cases. In case the interaction term is included it is customary to also include the separate covariates.
+
+```{r}
+set.seed(1001)
+x1<-seq(0,1,length.out=500)+rnorm(500,0,0.2)
+x2<-seq(0,5,length.out=500)+rnorm(500,0,0.5)
+y<-2.4*x1+1.2*x2+0.2*x1*x2+rnorm(500)
+
+#Estimate coefficients: Note that a large sample size is required for good estimates
+lm(y~x1+x2+x1*x2-1)
+```
+
+## Partialling out variables
+
+In order to measure the 'pure' impact of a predictor or the response variable, indirect effects need to be partialled out.
+
+```{r}
+#Example of how partialling out works and that it makes and impact
+require("isdals")
+data(bodyfat)
+attach(bodyfat)
+
+#Note that Triceps and Thigh are good predictors of Fat on the basis of the strong positive 
+#correlatation, but they themselves are very strongly correlated.
+cor(bodyfat)
+
+#The effect of Thigh on Thigh can be partialled out 
+mod_fat_thigh<-lm(Fat~Thigh)
+mod_triceps_thigh<-lm(Triceps~Thigh)
+part_cor_fat_triceps<-cor((predict(mod_fat_thigh)-Fat),(predict(mod_triceps_thigh)-Triceps))
+paste("Partial correlation between fat and thigh variables is:",round(part_cor_fat_triceps,2))
+```
+
+## Violation of assumptions
+
+We will have a look at how violations in the ordinary least squares assumptions affect the fit. If assumptions are violated it is advised to re-evalute the model (perform model iterations) and come with remedies. It is good to note that the residuals are the central quantities in these iterations that show potential model violations. Ideally one should obtain iid residuals with a normal distribution around zero, with constant variance, indicating a correct model specification and that all information in the data is incorporated into the model.
+
+- Non-linearity 
+
+We have to make a distinction in two types of non-linearity here, namely non-linearity in regressors and non-linearity in the response variable.
+The linear relationship can be simply extended in order to capture non-linear relationships as long as it is still linear in the variables, see for example the polynomial regression below.
+
+```{r}
+set.seed(1001)
+x<-seq(0,10,0.025)
+y<-1.2+2.4*x+0.5*x^2+rnorm(length(x),0,4)
+qlr_1<-lm(y~I(x^2))
+qlr_2<-lm(y~x+I(x^2))
+plot(x,y)
+lines(x,fitted(qlr_1),col="red",lwd=2)
+lines(x,fitted(qlr_2),col="blue",lwd=2)
+```
+
+Additionally also a transformation can be applied on the response variable $y$. The question arises in such a case how we can determine the most appropriate transformation. For this goal a Box-Cox (or power) transformation can be applied as seen below.
+
+```{r}
+set.seed(1001)
+x<-seq(0,10,0.025)
+y<-1.2+2.4*x+rnorm(length(x),0,1)
+y_n<-y^4
+bc_reg<-lm(y_n~x)
+bc<-boxcox(bc_reg)
+#The maximum log-likelihood is obtained for close to lambda=0.25, note here that BC gives the power that needs to be applied to obtain the reverse situation. 
+bc$x[which.max(bc$y)]
+```
+
+- Non-normality
+
+Non-normality doesn't necessarily need to be an issue as can be seen below. Note that a misspecified model can lead to the incorrect conclusion that the errors have a non-normal distribution.  
+
+```{r}
+set.seed(1001)
+x<-seq(0,10,0.025)
+
+#An symmetrical distribution still gives unbiased OLS estimates, however the test quantities will be unreliable as they assume normality
+y_t<-1.2+2.4*x+rt(length(x),5)
+lr_t<-lm(y_t~x)
+coef(summary(lr_t))
+norm_fit<-fitdist(lr_t$residuals,"norm")
+print(norm_fit)
+
+#Normality can be tested with for example the Jarque Bera test or the Shapiro Wilk test
+#(Null hypothesis is that distribution is normal)
+jarque.test(lr_t$residuals)
+shapiro.test(lr_t$residuals)
+
+#The package has some plotting tools
+plot(norm_fit)
+
+#log-normal distribution is asymmetric (fat right tail) and leads to biased OLS estimates
+y_ln<-1.2+2.4*x+rlnorm(length(x),0,1)
+lr_ln<-lm(y_ln~x)
+coef(summary(lr_ln))
+hist(lr_ln$residuals,breaks=20,main="histogram of residuals")
+```
+
+- Outliers
+
+It is important to identify outliers and appropriately clean data as this can have a large impact on (OLS) estimates.
+
+```{r,error=FALSE,warning=FALSE,message=FALSE}
+require(car)
+
+set.seed(1001)
+x<-seq(0,10,0.025)
+y<-1.2+2.4*x+rnorm(length(x))
+
+#Artificially generate outliers
+y[100]=3*y[100]
+y[200]=3*y[200]
+y[300]=3*y[300]
+
+#Regression
+lr_outl<-lm(y~x)
+coef(summary(lr_outl))
+
+#Leverage plots per regressor (1 in our case), gives the indices of suspected outliers 
+leveragePlots(lr_outl)
+
+#Detect outliers using Cooks distance
+cutoff <- 4/((nrow(y)-length(coef(lr_outl))-2)) 
+plot(lr_outl, which=4, cook.levels=cutoff,main="Cooks distance of regression")
+# Influence Plot 
+influencePlot(lr_outl, main="Influence Plot", sub="Circle size is proportial to Cook's Distance" )
+```
+
+- Multicollinearity
+
+We will see below that a strong correlation between regressors is a problem for the OLS method. The OLS estimate doesn't exist in case of perfect multicollinearity while a strong positive correlation can lead to an increase in the standard deviation of the OLS estimates, reducing the power of the t-tests. The OLS estimates will still be unbiased.
+It needs to be noted that multicollinearity is a data related issue and removing removing regressors can lead to biased OLS estimates on the other hand, which is known as omitted variable bias.
+
+```{r}
+# In the regression that we have defined earlier, the regressors are strongly correlated.
+cor(mlr_reg_1,mlr_reg_2)
+
+#Another way to detect multicollinearity is with the use of so called Variance Inflation Factors (VIF). A VIF of 4 or larger is often used as rule for the presence of multicollinearity.
+vif(mlr)
+
+# Note that if we define the mlr_reg_2 (from the earlier multiple regression) in the following way, that the OLS regressor doesn't exist. This is because there is a perfect correlation between mlr_reg_1 and mlr_reg_2
+
+set.seed(1001)
+mlr_reg_2<-seq(0,40,0.1)
+mlr_res<-3+4*mlr_reg_1+1.2*mlr_reg_2+rnorm(length(mlr_reg_1))
+mlr<-lm(mlr_res~mlr_reg_1+mlr_reg_2)
+cor(mlr_reg_1,mlr_reg_2)
+```
+
+- Omitted variable bias and additional regressors
+
+Below we will look at what happens if we remove or add regressors that are correlated with the response variable.
+
+```{r}
+# Note that if we want to remove a regressor that is (strongly) correlated with the response variable, ...
+# The OLS estimate is biased.
+mlr_1<-lm(mlr_res~mlr_reg_1)
+
+# The opposite occurs if we add a regressor that is correlated with the response variable.
+# Note that the standard deviation of the OLS estimates becomes larger as the correlation with the newly added regressor increases.
+set.seed(2002)
+mlr_new_1=mlr_res+rnorm(length(mlr_reg_2),0,1)
+mlr_new_2=mlr_res+rnorm(length(mlr_reg_2),0,15)
+cor(mlr_new_1,mlr_reg_2)
+cor(mlr_new_2,mlr_reg_2)
+mlr_2<-lm(mlr_res~mlr_reg_1+mlr_reg_2+mlr_new_1)
+mlr_3<-lm(mlr_res~mlr_reg_1+mlr_reg_2+mlr_new_2)
+coef(summary(mlr_2))
+coef(summary(mlr_3))
+```
+
+- Heteroskedasticity
+
+```{r}
+require("lmtest")
+require("sandwich")
+
+set.seed(1001)
+x<-seq(0.025,6,0.025)
+y<-1.2+2.4*x+rnorm(length(x),0,x)
+nonw_lm<-lm(y~x)
+
+#The plot will often clearly show heteroskedasticity.
+plot(x,y)
+
+#Heteroskedasticity can be tested using various test. We will use the Breusch-Pagan test 
+#(Null hypothesis assumes homoskedasticity)
+bptest(nonw_lm)
+
+#The problem with heteroskedasticity is that the OLS weighs all points equally while points with a smaller variance carry more information and should be weighted more heavily. There are various remedies.
+
+# Making transformations, like taking the log of the dependent variable
+log_model<-lm(log(y)~x)
+
+#Robust estimators: As estimators are unbiased we can use robust standard errors in order to correct for heteroskedasticity in the hypothesis tests. 
+coeftest(nonw_lm, vcov = vcovHC(nonw_lm, "HC1")) 
+
+#Weighted least squares (also called general least squares): address the issue of equally weighting all points by incorporating weights depending on the variance (this can be seen as a correction in order to obtain a homoskedastic situation).
+w_lm<-lm(y~x,weights = 1/(0.2*x))
+
+plot(x,y)
+abline(a=1.2,b=2.4,col="red")
+abline(w_lm,col="green")
+abline(nonw_lm,col="blue")
+
+legend("topleft",legend=c("actual","weighted","OLS"),col=c("red","green","blue"),lty=1)
+
+#Note the weighted least squares are closer to the actual coefficients
+coef(summary(w_lm))
+coef(summary(nonw_lm))
+```
+
+- Autocorrelation
+
+```{r}
+set.seed(1001)
+zt<-c(rnorm(1))
+
+for(i in 2:200){
+  zt[i]=0.96*zt[i-1]+rnorm(1)
+}
+
+x=1:200
+y=1.2+1.8*x+zt
+
+#Note that the OLS estimation yields unbiased estimates, however the test results can be unreliable
+lr<-lm(y~x)
+summary(lr)
+
+#Autocorrelation can be detected using various tests, we will use the Durbin-Watson test.
+#Note that the Durbin Watson test rejects the null hypothesis that there is no autocorrelation. Autocorrelation in the response will affect the residuals and as a result also the residuals can be tested.
+durbinWatsonTest(lr)
+
+#The autocorrelation function (ACF) can also be used to spot autocorrelation.
+acf(y)
+
+#Same can be concluded by regressing a variable on its lagged self
+summary(lm(lr$residuals[2:101]~lr$residuals[1:100]))
+
+#The consequence of autocorrelation is that the the results of the hypothesis tests can be unreliable. However the OLS coefficients are still unbiased, the estimators are consistent and yield accurate estimates for a large sample
+lr<-lm(zt[2:251]~zt[1:250])
+
+#Autocorrelation can be addressed in various way, most commonly by adding lag terms as done above. Autocorrelation will occur mostly in the context of time series.
+```
+
+### Time Series
+
+We need to make a distinction in two types of data:
+  - Cross-sectional data: Data on certain attributes collected at one point in   time.
+  - Time series data: Data on certain attributes collected on different (regular) points in time.
+
+Time series pose certain challenges in making use of OLS. One of the possible issues, autocorrelation in data, was already discussed in the last section. Many time series, like for example in case of stock price returns, will be affected heavily by previous datapoints.
+
+Additionally trends in the covariates and response in time series can easilly lead to spurrious regression if one is not careful. An example is given below.
+
+```{r}
+#Generate random walks
+rw_1<-0
+rw_2<-0
+  
+set.seed(1001)
+
+for(i in 2:100){
+  rw_1[i]<-rw_1[i-1]+rnorm(1)
+  rw_2[i]<-rw_2[i-1]+rnorm(1)
+}
+
+#Perform a regression: Note that the regression slope coeffiecient is very significant while the two coefficients are not related. This is known as spurrious regression.
+rw_fit<-(lm(rw_2~rw_1))
+summary(rw_fit)
+
+#We shouldn't be explain the movements in the random walk with another variable, so how can show this in a regression? Now look what happens if we:
+#1. Add a trend 
+summary(lm(diff(rw_2)~diff(rw_1)+seq(1,99)))
+
+#2. Take time differences in the variables (so that they become stationary, i.e. have the same distribution statistics over time)
+summary(lm(diff(rw_2)~diff(rw_1)))
+
+#As the random walk is autoregegressive, adding a lag should yield a significant (OLS) coefficient.
+summary(lm(rw_1[2:100]~rw_1[1:99]))
+```
+
+Time series models are a topic of there own as also can be seen from the example and will be discussed separately.
+
+## Application of OLS on a dataset
+
+```{r,error=FALSE,warning=FALSE,message=FALSE}
+require('AER')
+require('zoo')
+require('GGally')
+data("MurderRates")
+
+#Normally it is good to examine the data for outliers, however due to the smal dataset and as we want to focus on the regression analysis we will include all data in the dataset.
+
+#Make a pairs plot to see relation in the data
+#Note that there is a notable correlation between lfp and income, which can impact the bias/variance in the estimation depending on whether or not they are included. 
+ggpairs(MurderRates)
+
+#Full model
+full_model<-lm(rate~.,data=MurderRates)
+summary(full_model)
+
+#Null model
+null_model<-lm(rate~1,data=MurderRates)
+
+#Note that including new variables will always lead to a better fit (R^2), however we want to eliminate insignificant variables and obtain a 'parsimonious' and 'optimal' model that works as well on non-training data. There are different measures that can be optimized in order to obtain such an optimal model, like the Adjusted R^2, AIC or BIC. The step function does this in terms of the AIC.
+#The step function can either start with the full model and optimize backward by dropping variables or start with an empty model and keep adding variables. We choose the option 'both' which examined both cases.
+red_model<-step(full_model,direction ="both")
+summary(red_model)
+
+require(stats)
+AIC(red_model)
+
+#Manually extending reduced model
+add_model<-lm(rate ~ convictions + time + noncauc + southern + income ,data=MurderRates)
+
+#1. Looking at the AIC: This method prefers the model selected by the step() procedure (by definition). Note that the difference is small.
+AIC(red_model)
+AIC(add_model)
+
+#2. Looking at the significance of new variable: Gives that added variable is not significant
+summary(add_model)
+
+#3. Looking at the adjusted R^2: This method prefers the extended model by a slight margin
+summary(red_model)$adj.r.squared
+summary(add_model)$adj.r.squared
+
+#4. Looking at the BIC: (penalizes more heavily than AIC, a lower BIC indicates a better model). This method prefers red_model
+BIC(red_model)
+BIC(add_model)
+
+#5. Using ANOVA: The new model doesn't account for sufficient reduction in the RSS. Note that this gives the same p-value as in the OLS t-test.
+anova(red_model,add_model)
+
+#Another possibility is to look at the performance of the model on test (or other non-training) data, this approach is used in Machine Learning in selecting a model.
+
+#We divide the dataset in a train and testset so that we can evaluate the performance on the testset.
+dataset=MurderRates
+ntrain<-ceiling(0.7*nrow(dataset))
+trainset<-dataset[1:ntrain,]
+testset<-dataset[(ntrain+1):(nrow(dataset)),]
+
+red_model<-lm(rate ~ convictions + time + noncauc + southern,data=trainset)
+add_model<-lm(rate ~ convictions + time + noncauc + southern + income ,data=trainset)
+red_pred<-predict(red_model,testset)
+add_pred<-predict(add_model,testset)
+
+require("Metrics")
+err_red<-rmse(red_pred,testset[,1])
+err_add<-rmse(add_pred,testset[,1])
+
+#Add model performs better according to it's performance on the testset as measured by the rmse. However note that the training set is small and the performance could be quite different on a different dataset.
+cat("Rmse of red_model is:",err_red,", Rmse of add_model is:",err_add)
+```
+
+Testing assumptions of linear regression
+
+```{r}
+require(moments)
+
+#We will only look at the red_model.
+red_model<-lm(rate ~ convictions + time + noncauc + southern,data=MurderRates)
+
+# Testing for multicollinearity: Note that the vif doesn't indicate multicollinearity. This can also be seen from the standard errors of the coefficient estimates not being remarkably high.
+vif(red_model)
+
+#Testing normality: OLS doesn't require a normal distribution of the residuals, however this assumption allows one to perform statistical hypothesis testing. If this condition is violated, it does not necessarily mean the estimator is biased, however the (t-)test results will be unreliable.
+# Based on below tests we can not reject the normality assumptions for alpha=0.05, although the p-value is not very high.
+norm_fit_red<-fitdist(red_model$residuals,"norm")
+plot(norm_fit_red)
+jarque.test(red_model$residuals)
+shapiro.test(red_model$residuals)
+
+#Testing heteroskedasticity: Consequence of heteroskedasticity is that the obtained estimates are still unbiased and consistent, but not/less efficient, i.e. OLS estimates are not BLUE and test results become less reliable. 
+#The Breusch-Pagan test is used and doesn't give heteroskedasticity for alpha=0.05, but it is very close.  
+require("lmtest")
+bptest(red_model)
+
+#We can also examine the plot of residuals
+plot(red_model$residuals,main="Plot of residuals")
+
+#Based on the low p-value and residual plot it is good to examine possible remedies.
+
+# Take the log of the dependent variable, the step() procedure selects the same set of dependent variables.
+log_red_model<-lm(log(rate) ~ convictions + time + noncauc + southern,data=MurderRates)
+bptest(log_red_model)
+
+#Again make a plot of residuals (should be standard practice)
+plot(log_red_model$residuals,main="Plot of residuals of the log model")
+
+#One should be careful however from drawing conclusions on the better model as can be seen from the R^2
+summary(log_red_model)$r.squared
+summary(red_model)$r.squared
+
+#Using Robust standard errors 
+coeftest(red_model, vcov = vcovHC(red_model, "HC1")) 
+
+#Using weighted (general) least squares
+data_copy<-MurderRates
+data_copy$logres<-log(red_model$residuals^2)
+var_red<-lm(logres~time + income + lfp + noncauc + southern,data=data_copy)
+data_copy$resvar<-exp(var_red$fitted.values)
+wei_red_model<-lm(rate ~ time + income + lfp + noncauc + southern,weights=1/sqrt(resvar),data=data_copy)
+
+#These are the est. coefficients by this model
+summary(wei_red_model)
+
+#Testing for autocorrelation
+#Durbin Watson test shows (clearly) no autocorrelation
+durbinWatsonTest(wei_red_model)
+```
+
+## Other regressions
+
+## Regularization (Lasso and Ridge regression)
+
+In the OLS variables are either included or not. It is possible to include all variables but 'shrink' their coefficients, which is done in case of regularization. More specifically an additional sum $\lambda \sum_{i=1}^{n}f(\beta_i)$ is added to the quantity for optimization, here the $\lambda$ is a shrinkage factor, while the $\beta_i$ represent the coefficients.
+
+Note now that the optimization focuses on two quantities being $\lambda \sum_{i=0}^Nf(\beta_i)$ and the sum of squared errors. Choosing a large $\lambda$ leads to a stronger shrinkage of the coefficients $\beta_i$ to compensate, however this can increase the sum of squared errors. The optimal solution therefore balances both quantities.
+
+### Ridge regression
+
+```{r,message=FALSE,error=FALSE}
+require(ridge)
+
+#Note that the ridge regression gives estimates in case of perfect multicollinearity
+set.seed(1001)
+mlr_reg_2<-seq(0,40,0.1)
+mlr_res<-3+4*mlr_reg_1+1.2*mlr_reg_2+rnorm(length(mlr_reg_1))
+ridge<-linearRidge(mlr_res~mlr_reg_1+mlr_reg_2)
+
+#Ridge regression is less prone to overfitting than OLS as it discourages model complexity
+
+#First convert factor variables to dummies for the Ridge regression
+new_col=ifelse(MurderRates[,8]=="yes",1,0)
+tr_MurderRates=data.frame(MurderRates[,1:7],new_col)
+
+total_length<-nrow(tr_MurderRates)
+size_vec<-seq(20,40,1)
+
+OLS_est<-lm(rate ~ . ,data=tr_MurderRates[1:30,])
+OLS_perf_train<-sum((tr_MurderRates[1:30,1]-predict(OLS_est,tr_MurderRates[1:30,]))^2)/(30)
+OLS_perf_test<-sum((tr_MurderRates[31:total_length,1]-predict(OLS_est,tr_MurderRates[31:total_length,]))^2)/(total_length-31)
+
+ridge_est<-linearRidge(rate ~ . ,data=tr_MurderRates[31:total_length,])
+ridge_perf_train<-sum((tr_MurderRates[1:31,1]-predict(ridge_est,tr_MurderRates[1:31,]))^2)/(30)
+ridge_perf_test<-sum((tr_MurderRates[31:total_length,1]-predict(ridge_est,tr_MurderRates[31:total_length,]))^2)/(total_length-31)
+
+#Note that due to overfitting the OLS performs better at the training set than the ridge regression, while the ridge regression performs better at the test set. 
+
+#Training set performance (in terms of sum of squared errors per point)
+print(paste("Sum of squared errors per point for OLS estimator in training set is:",round(OLS_perf_train,4)))
+print(paste("Sum of squared errors per point for OLS estimator in training set is:",round(ridge_perf_train,4)))
+
+#Test set performance (in terms of sum of squared errors per point)
+print(paste("Sum of squared errors per point for OLS estimator in test set is:",round(OLS_perf_test,4)))
+print(paste("Sum of squared errors per point for OLS estimator in test set is:",round(ridge_perf_test,4)))
+
+```
+
+
+### Ridge regression vs OLS in case of multicollinearity 
+
+We can see in the example below that Ridge regression gives a much better fit in case there is multicollinearity. The lm.ridge function comes from the MASS library.
+
+```{r,message=FALSE}
+require(MASS)
+set.seed(123)
+x1 <- rnorm(20)
+x2 <- rnorm(20,mean=x1,sd=.01)
+y <-3+x1+x2+rnorm(20)
+OLSfit<-lm(y~x1+x2)
+Ridgefit<-lm.ridge(y~x1+x2,lambda=1)
+OLSfit$coefficients
+Ridgefit
+```
+
+### Determining optimal shrinkage
+
+We use the MurderRates dataset, to illustrate a Ridge regression and how to choose the optimal shrinkage factor.
+
+```{r,message=FALSE}
+require(lasso2)
+require(MASS)
+
+x = seq(0,50,len=5000)
+ridge_reg = lm.ridge(rate~.,data=MurderRates,lam=x)
+
+#Ridge traces
+plot(ridge_reg)
+
+#Checking for optimal shrinkage
+plot(ridge_reg$lambda,ridge_reg$GCV,type='l',xlab="lambda",ylab="GCV",main="GCV vs shrinkage")
+```
+
+We see from the general cross validation that a lambda of around 15 is optimal.
+
+### Evaluating Model Performance
+
+
+```{r,message=FALSE,warning=FALSE}
+
+#Ridge.lm requires some work to check the model performance. We again make use of the testset and trainset, we make copies for transformations.
+testset_cop<-testset
+trainset_cop<-trainset
+
+#Change factors to numeric
+trainset_cop$southern<-as.numeric(trainset$southern)
+testset_cop$southern<-as.numeric(testset$southern)
+
+#Train model on testset. Investigation shows what choice of lambda is optimal.
+ridge_reg = lm.ridge(rate~.,data=trainset_cop,lam=x)
+which(ridge_reg$GCV==min(ridge_reg$GCV))
+
+ridge_reg = lm.ridge(rate~.,data=trainset_cop,lam=9.30)
+
+#predict model outcomes using the model linearity
+pred<-as.matrix(cbind(const=1,testset_cop))[,c(1,3:9)] %*% coef(ridge_reg)
+
+#Examine prediction performance (Examined that an arbitraty lambda leads to a weaker performance)
+rmse <- mean((testset_cop$rate - pred)^2)
+print(rmse)
+
+#Another way to do this is useing the package glmnet. This package has many functionalities and allows for different types of regression.
+#It is good to note that the glmnet function for ridge regression will return different estimates as the glmnet standardizes the response and uses the MSE instead of the SSE. We could make transformations in the data to offset this, however we will for now just demonstrate the results. 
+
+# load the package
+require(glmnet)
+
+# Put data in right format
+x_train <- as.matrix(trainset[,2:7])
+y_train <- as.matrix(trainset[,1])
+
+x_test <- as.matrix(testset[,2:7])
+y_test <- as.matrix(testset[,1])
+
+# fit model, alpha=0 gives Ridge. Investigation shows a lambda around 0.25 gives the best results.
+fit <- glmnet(x_train, y_train, family="gaussian", lambda=0.25)
+# summarize the fit
+coef(fit)
+# make predictions
+predictions <- predict(fit, x_test, type="link")
+# summarize accuracy
+rmse <- mean((y_test - predictions)^2)
+print(rmse)
+
+```
+
+### Lasso regression
+
+We perform a Lasso regression and evaluate the model performance.
+
+```{r,warning=FALSE,message=FALSE}
+#We will use the lars package here, although glmnet can also be used.
+require(lars)
+
+x=seq(0,1,0.01)
+las_fit<-glmnet(x_train, y_train,lambda=x)
+las_fit<-lars(x_train, y_train, type="lasso")
+
+# summarize the fit
+coef(fit)
+
+# select a step with a minimum error (example of a stepwise regression approach as we will see later)
+best_step <- las_fit$df[which.min(las_fit$RSS)]
+# make predictions
+predictions <- predict(las_fit, x_test, s=best_step, type="fit")$fit
+# summarize accuracy
+rmse <- mean((y_test - predictions)^2)
+print(rmse)
+```
+
+### Elastic Nets
+
+This is a combination of both Ridge and Lasso, as the regression model is both penalized by the L1 and L2 norm.
+
+```{r}
+#We again use the glmnet package.
+
+# fit model, we select alpha=0.5 for elastic nets. The lambda is chosen based on model performance iterations.
+el_fit <- glmnet(x_train, y_train, family="gaussian", alpha=0.5, lambda=0.5)
+# summarize the fit
+summary(el_fit)
+# make predictions
+predictions <- predict(el_fit, x_test, type="link")
+# summarize accuracy
+rmse <- mean((y_test - predictions)^2)
+print(rmse)
+```
+
+## Stepwise regression: Least Angle Regression
+
+Stepwise regression refers to automated procedures for choosing the next variable to be included in the regression model. We have for example seen that R contains a step() function for stepwise regression in OLS. This procedure is however 'greedy' in that it decides to include or exclude variables based on GOF measures (like $R^2$, AIC, BIC etc).
+
+There might be cases in which other considerations play an important role. We could for example like to include some variables that are related, together into the model. The stepwise regression will have the tendency in this case to exclude some of these variables as the inclusion of a second or successive variable might not have a large enough impact on the model performance due to correlation effects.
+There are stepwise regression procedures that are add variables in a piecewise manner. An example is the Least Angle Regression. The package lars contains this procedure. It is good to note that this prcoedure is implemented in an efficient way and takes optimal steps rather than tiny steps together with evaulation at a time (we have seen an example in the lasso regression).
+
+```{r}
+X <- model.matrix(rate~.,data=MurderRates)
+lar_mod<-lars(X, MurderRates$rate, type = "lasso")
+coef(lar_mod) #Coefficients
+lar_mod$R2 #Coefficient of determination per step
+summary(lar_mod)
+plot(lar_mod,main="LAR on rate variable in MurderRates dataset")
+```
+
+## Local and kernel regression
+
+In case of a local regression a line is fitted locally, most commonly per point. The problem in this case is to obtain $\beta(x)$ for which the quantity $\sum_{i=1}^{n}w_i(x)(y_i-X\beta(x))$ is minimized. Here it is assumed that $w_i(x)$ is proportional to some Kernel function $K(x_i,x)$.
+The Kernel function $\left(1-\left(\frac{|X_i-X_0|}{h}\right)^3\right)^3$ is an example of a common choice. How smooth the fit will be depends on the span, a higher span takes a wider neighborhood into account and therefore yields a smoother fit. 
+Loess and lowess regressions are examples of local regressions. 
+
+More generally note that these are examples of kernel regressions. Kernel regression is a non-parametric technique for different approaches that estimatee the function $m$ in the relation $E(Y|X)=m(X)$ using kernel functions. In the above case, the function $m$ was constructed as a locally weighted average using a kernel for weights. 
+
+Below we show an example of local regression and one kernel regression approach ( Nadaraya-Watson).
+
+```{r}
+x=seq(0,10,0.01)
+y=1.2+2.4*(x*sin(x))+rnorm(length(x),0,5)
+
+par(mfrow=c(1,2))
+
+#argument f gives the smoother span, a larger value will yield a smoother fit.
+plot(x,y,main="lowess regression")
+lines(lowess(x,y,f=1/3),lty=1,col="blue")
+lines(lowess(x,y,f=2/3),lty=1,col="red")
+legend("topleft",legend=c("f=1/3","f=2/3"),col=c("blue","red"),lty=1)
+
+#loess is another implementation in R that is newer and more flexible. Note that loess and lowess follow a different syntax. 
+plot(x,y,main="loess regression")
+lines(x,loess(y~x,span=0.10)$fitted,lty=1,col="blue")
+lines(x,loess(y~x,span=0.50)$fitted,lty=1,col="red")
+legend("topleft",legend=c("span=0.1","span=0.5"),col=c("blue","red"),lty=1)
+
+#Additionally we look at the Nadaraya-Watson kernel smoother method
+require(stats)
+par(mfrow=c(1,1))
+plot(x,y,main="Nadaraya-Watson method")
+lines(ksmooth(x,y),col="red")
+```
+
+## Main References
+
+- Econometric methods with applications in business and economics, C Heij et al, 2004
+- Elements of Statistical Learning (2nd edition), T Hastie et al, 2016
+- Principles of econometrics with R, C Colonescu, 2016
+- Machine Learning Foundations: A case study approach, University of Washington (Coursera)
+- Various packages and corresponding documentation listed used in the above analyses (lars, glmnet, MASS, ridge, AER etc)
+- Linear models with R (2nd edition), JJ Faraway, 2015

@@ -1,0 +1,90 @@
+---
+title: "Securitizations, Merton model and Vasicek distribution"
+output: html_document
+author: Yusuf Tatlier
+---
+
+## Merton model
+
+The Merton model can be used in order to estimate the probability of default of companies. The Merton model is an example of structured models which estimate the probability of default by the structure of the balance sheet.
+In order to construct the Merton model, assume that the stochastic process $A_t$ represents the value of a companies' assets. The company can finance itself with equity or debt, as a result $A_t$ is the sum of the value of the firms' equity at time $t$, given by $E_t$, and the firms' debt at time $t$, given by $B_t$. Mertons' model makes the simplifying assumptions that the debt consists of a single payment that needs to be done at time $T$, i.e. $B_T=B$, implying that default can only occur at this time. It is assumed that no dividends will be paid and no new debt will be issued before time $T$. All this implies that default occurs in the event that $A_T<B$. It is assumed that $A_t$ satisfies the SDE $$dA_t=A_t \mu dt+\sigma A_t dX_t$$ Here $X_t$ is a Brownian motion which means that $A_t$ follows a geometric Brownian motion. 
+The solution to this SDE is given by:
+$$  A_T=A_0 \times e^{(\mu-0.5\times\sigma^2)T+\sigma \times X_T}$$
+Default occurs in the event that $\{A_T<B\}$. Using that $X_T=\sqrt{T} \epsilon$, with $\epsilon$ having a standard normal distribution, we can show that this is equivalent to the event of the form $\{\epsilon <\zeta_T\}$: Using the solution for $A_T$ we can obtain from the event $\{A_T<B\}$ that:
+$$  \epsilon<\frac{1}{\sigma \sqrt{T}}\left(log\left(\frac{B}{A_0}\right)-(\mu-0.5\times\sigma^2)T\right)\
+$$
+We will denote the probability that this happens by $q$. As $\epsilon$ has a standard normal distribution, we can express $q$ using a standard normal cdf (denoted by $\Phi()$)) as follows $q=\Phi\left(\frac{1}{\sigma \sqrt{T}}\left(log\left(\frac{B}{A_0}\right)-(\mu-0.5\times\sigma^2)T\right)\right)$. 
+
+Note now that this problem is similar to the valuation of an European call option with strike $K=B$ at maturity.
+
+```{r}
+Merton=function(B){
+  T=1
+  sigma=0.1
+  A_0=100
+  #B=90
+  mu=0.05
+  
+  d_2=(log(A_0/B)+(mu-0.5*sigma^2)*T)/(sigma*sqrt(T))
+  return(pnorm(-d_2))
+}
+
+Merton(90)
+
+```
+
+## Securitizations and Vasicek distribution
+
+Securitization is the process of constructing new securities from the cashflows of a pool of securities, which provides the benefit that securities with a wide range of risk profiles can be provided. In this section we will assume that a pool of $N$ identical loans are used, the securities obtained in this way are known as CDOs.
+Now assume that variable $L_i$ is used in order to denote the gross loss on the i'th loan, i.e. $L_i=1$ if the i'th borrower defaults and 0 otherwise. The Vasicek model extends the Merton model in order to look at a portfolio with correlated loans, by replacing the Brownian motion with 
+$$ X_{i,t}=\sqrt{\rho} Y_t + \sqrt{1-\rho} Z_{i,t} $$ 
+Here $Y,Z_1,...Z_N$ are all iid standard normal distributions. The variable $Y$ is the common factor for all loans and is therefore the systematic component, while the $Z_i$ provide the idiosyncratic components.
+Note now that event $\{L_i=0\}$ corresponds with the event $\{X_i<\zeta_i\}$ for the expression  $\zeta_i$ as derived earlier, let's set $\zeta_i=\Phi^{-1}(q)$ for the probability of default $q$, for all $i$. We can therefore write:
+$$ P\{L_i=1|Y\} = P\{X_i<\Phi^{-1}(q)|Y\}=P\{\sqrt{\rho} Y + \sqrt{1-\rho} Z_i<\Phi^{-1}(q)|Y\}=P\left\{Z_i<\frac{\Phi^{-1}(q)-\sqrt{\rho}Y}{\sqrt{1-\rho}} \mid Y\right\}  $$
+
+This expression gives the probability that position $i$ defaults, the total number of defaults will follow a binomial distribution. We will assume that $q$ is independent of $i$. For the portfolio loss it holds that:
+$$ P\{ \sum_{i=0}^n L_i =n|Y\} = {N \choose n} q^n (1-q)^{N-n}     $$
+The quantity we are actually interested in is the portfolio loss $L=\frac{1}{N}\sum_{i=1}^{N}L_i$ which doesn't converge to a normal distribution in case of correlation between the individual loans, as the individual losses are not iid.
+A Monte Carlo simulation can be performed in order to approximate this probability, which is done below.
+
+```{r}
+n_sim=5000
+n_ins=100
+rho=0.2
+
+set.seed(50)
+
+# We take a fixed probability of default
+r_beta=matrix(rep(0.005,n_sim*(n_ins+1)),n_sim,n_ins+1)
+#A Beta prior for default probability can be used to also sample for probability of default
+#r_beta=matrix(rbeta(n_sim*(n_ins+1),1,199),n_sim,n_ins+1)
+
+corr_bern_matrix=matrix(rep(0,n_sim*(n_ins+1)),n_sim,n_ins+1)
+corr_bern_matrix[,1]=sapply(r_beta[,1],function(x){rbinom(1,1,x)})
+for(i in 1:n_sim){
+  for(j in 2:(n_ins+1)){
+    corr_bern_matrix[i,j]=sqrt(rho)*corr_bern_matrix[i,1]+sqrt(1-rho)*rbinom(1,1,r_beta[i,j])
+  }
+}
+
+port_loss<-apply(corr_bern_matrix[,2:(n_ins+1)],1,mean)
+```
+
+It can additionally be shown that the portfolio loss $L$  converges to the so called Vasicek distribution for a large (i.e. $n$ is large) and homogeneous portfolio. Here it is assumed that the correlation $\rho$ between any two loans is the same. This distribution is given by:
+$$ P\left(L \leq x \right)=\Phi\left\{\frac{\sqrt{1-\rho} \Phi^{-1}(x)-\Phi^{-1}(q)}{\sqrt{\rho}}\right\} $$
+We will show in the code below how this distribution looks like. It can be seen from the two plots that a higher correlation leads to a more bimodal distribution, i.e. due to the higher dependence 
+
+```{r}
+#Vasicek portfolio loss distribution for correlation of 0.1 and q=0.02
+x=seq(0,1,0.0001)
+Vasicek = function(rho,x,q){pnorm(((sqrt(1-rho)*qnorm(x)-qnorm(q))/(sqrt(rho))))}
+plot(x,Vasicek(0.1,x,0.02),type="l",xlab="loss",ylab="density",main="Portfolio loss distribution for rho=0.1",xlim=c(0,0.4))
+
+#Vasicek portfolio loss distribution for correlation of 0.9
+plot(x,Vasicek(0.9,x,0.02),type="l",xlab="loss",ylab="density",main="Portfolio loss distribution for rho=0.9")
+```
+
+## Main References
+
+* Modeling Credit Risk: The loss distribution of a loan portfolio, G Magnou, 2018
+* Centre for Central Banking Studies, S Chatterjee, 2015

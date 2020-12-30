@@ -1,0 +1,477 @@
+---
+title: "Time Series"
+author: "Yusuf Tatlier"
+output: html_document
+---
+
+A time series is a stochastic process ${X_t,t \in {0,1,2,...}}$ indexed by time defined on a probability space $(\Omega,\mathcal{F},\mathcal{P})$. One needs to be careful in talking about the stochastic process itself and its realizations. This R markdown file is an applied supplement to the regression document in which time series theory was (briefly) discussed.
+
+Below we make a time series plot as a start, making use of the ts (time series) object in the astsa package.
+
+```{r,error=FALSE,message=FALSE,warning=FALSE}
+require("astsa")
+require("tseries")
+plot(ts(sales),main="sales data",xlab="months",ylab="sales") #ts operator convert data to a ts (time series) format
+```
+
+## Autocorrelation function
+
+The autocorrelation function in R (acf) will point out (possible) autocorrelation, as for example below for an AR(1) process. 
+
+```{r}
+#We construct AR time series (so which are correlated)
+Xt=c(rnorm(1))
+Yt=c(rnorm(1))
+for(i in 2:1000){
+  Xt[i]=Xt[i-1]+rnorm(1)
+  Yt[i]=0.2*Yt[i-1]+rnorm(1)
+}
+
+#Note that the autocorrelation can be significant according to the ACF over multiple lags, while only one lag is used in the simulation of the data.
+#Note that the autocorrelation decays faster with a smaller factor.
+par(mfrow=c(1,2))
+acf(Xt,type="correlation",main="AR(1) with factor 1")
+acf(Yt,type="correlation",main="AR(1) with factor 0.1")
+
+#acf can also be printed
+print(acf(Xt,plot=FALSE))
+```
+
+## White noise process
+
+The most basic time series that we will encounter is a so called white noise process, which is a stochastic process in which all $X_t$ are iid $\mathcal{N(0,\sigma^2)}$. 
+
+```{r}
+set.seed(1001)
+wn_process<-ts(rnorm(1000,0,1))
+plot(wn_process,main="White noise process",xlab="time")
+acf(wn_process,main="acf white noise process")
+mean(wn_process) #Mean estimate
+acf(wn_process,type="covariance")$acf[1] #Variance estimate
+```
+
+## Random walk
+
+A random walk can be seen as a cumulative white noise process.
+
+```{r}
+plot(ts(cumsum(wn_process)),main="Random walk",xlab="time")
+#Note that the random walk is not stationary (i.e. moment characteristics of the series changes over time), however it is I(1), so (first-order) differencing yields a stationary series
+wn_diff=diff(wn_process)
+plot(wn_diff,main="Differenced random walk",xlab="time")
+```
+
+## AR(p) model
+
+An autoregressive model of order p has the form $X_t=c+\sum_{i=1}^{p}\phi_iX_{t-i}+\epsilon_t$, where $\epsilon_t$ is a white noise process with variance $\sigma_t$ and the $\phi_j$ denote weights.
+
+```{r}
+set.seed(1001)
+wn<-rnorm(200)
+Xt<-c(wn[1],wn[2])
+
+for(i in 3:100){
+  Xt[i]=2+0.5*Xt[i-1]+0.5*Xt[i-2]+wn[i]
+}
+
+AR2_process=ts(Xt[3:100])
+plot(AR2_process,main="AR(2) process",xlab="time")
+```
+
+## MA(p) model
+
+A moving average model of order p has the form $X_t=c+\sum_{i=1}^{p}\theta_i \epsilon_{t-i}$
+in which $\theta_i$ denote weights. Below a MA(3) process is simulated, note that autocorrelation is observed to be significant until for past three lags.
+
+```{r}
+xt=NULL
+
+for(i in 4:1000){
+  xt[i]=wn_process[i]+wn_process[i-1]+wn_process[i-2]+wn_process[i-3]
+}
+
+MA3_process=ts(xt[4:1000])
+plot(MA3_process,main="MA(3) process",xlab="time")
+#Without the acf it would be impossible to see that this is a MA(3) process from the plot
+acf(MA3_process,type="correlation")
+```
+
+A moving average process can be used for time series smoothing as can be seen in the example below. The larger the order of the series, the more the time series is averaged and thus smoothed.
+
+```{r}
+require("forecast")
+
+data(bev)
+plot(ts(as.numeric(bev))) #For convenience leave out x values (years)
+lines(as.numeric(na.omit(ma(bev,order=2))),col="red")
+lines(as.numeric(na.omit(ma(bev,order=10))),col="blue")
+#Note that the second line is much smoother
+```
+
+## ARMA(p,q) and ARIMA(p,d,q) process
+
+The ARMA(p,q) process is the combination of an AR(p) and MA(q) process, while the ARIMA(p,d,q) applies a d order differencing on the response.
+In below cases ARMA and ARIMA processes will be simulated. For efficiency the parameters and coefficients will be estimated using R functions. 
+
+```{r}
+phi_1<-0.6;phi_2<-0.3
+q_1<-0.5;q_2<-0.4
+sigma=1
+set.seed(1001)
+ARMA_2_2<-arima.sim(n = 10000, list(ar = c(phi_1, phi_2),ma=c(q_1,q_2)),sd=sigma)
+
+#Both the acf and pacf are tailing off. As a result the right orders can't be infered from them, but it indicates that the process is unlikely to be just AR(p) or MA(q).
+
+#For higher order processes, auto.arima can have difficulties in estimating the right orders. For (p,q)=(2,2) the estimation is still quite accurate.
+auto.arima(ARMA_2_2)
+
+#Now look at a process that is integrated of order 2.
+set.seed(1001)
+ARIMA_2_2_2<-arima.sim(n = 10000, list(ar = c(phi_1, phi_2),order=c(2,2,2),ma=c(q_1,q_2)),sd=sigma)
+
+#The plot clearly shows that it is not a stationary time series
+plot(ARIMA_2_2_2,main="Time series that is I(2)")
+
+#Examine now the plot for the differenced time series
+par(mfrow=c(2,1))
+plot(diff(ARIMA_2_2_2),main="Time series differenced once")
+plot(diff(ARIMA_2_2_2,differences=2),main="Time series differenced twice")
+
+#Use that twice differenced ARIMA series is ARMA
+auto.arima(diff(ARIMA_2_2_2,differences=2))
+```
+
+## Estimation of time series coefficients
+
+In order to estimate coefficients of time series, the following steps need to be taken:
+
+- A model needs to be chosen, i.e. it needs to be assessed what type of time series has generated the data.
+- The order of the time series needs to be assessed.
+- The coefficients of the time series need to be assessed for determined order under previous bullet.
+
+## Assessing the order of the series
+
+In assessing the order of the time series, different approaches can be used. It can be visually examined what the order of the series is, but also Goodness-Of-Fit (GOF) measures can be examined for different order models. Below both approaches will be shown.
+
+In visually assessing the order of the series the acf is useful for MA series, but not directly for AR series as can be seen in the example below. 
+
+```{r}
+#For efficiency the function arima.sim is used for simulation of the data
+set.seed(1001)
+phi_1=0.5
+phi_2=0.3
+sigma=1
+AR_2<-arima.sim(n = 20000, list(ar = c(phi_1, phi_2)),sd=sigma)
+MA_2<-arima.sim(n = 20000, list(ma = c(phi_1, phi_2)),sd=sigma)
+par(mfrow=c(2,1))
+acf(AR_2,main="acf of AR(2) series")
+acf(MA_2,main="acf of MA(2) series")
+
+```
+
+In case of AR series it is useful to look at the so called Partial Auto-Correlation Function (PACF) in which indirect effects are partialled out as can be seen in the example below. In this example it will be used as a given that the data is generated by a AR process. 
+
+```{r}
+#For efficiency the function arima.sim is used for simulation of the data
+phi_1=0.5
+phi_2=0.3
+sigma=1
+AR_2<-arima.sim(n=1000,list(ar=c(phi_1,phi_2)),sd=sigma)
+
+#Note that p=1 and 2 are significant for the PACF
+par(mfrow=c(3,1))
+plot(ts(AR_2),main="AR(2) process with phi_1=0.5 and phi_2=0.3")
+acf(AR_2,type="correlation",main="ACF")
+acf(AR_2,type="partial",main="PACF")
+```
+
+To summarize using the ACF and PACF in assessing lags:
+- For an AR(p) model the ACF tails off, while the PACF cuts off after p lags
+- For an MA(p) model the PACF tails off, while the ACF cuts off after q lags
+- For an ARMA(p,q) model both the ACF and PACF tail off as result of previous two points.
+
+In case of the third bullet, one knows that an ARMA estimation approach function needs to be applied, as the visual autocorrelation plots will not be helpful for the estimation of the lags. One could for example use GOF optimization strategies.
+
+The AIC is a common GOF measure for time series and can be used in order to examine the order of a series. For convenience we show this GOF for an AR process.
+
+```{r}
+arima_vec<-c()
+
+for(i in 1:10){
+  aic<-arima(AR_2,order=c(i,0,0))$aic
+  arima_vec<-c(arima_vec,aic)
+}
+plot(arima_vec,main="AIC values for different order AR fits")
+
+#Here the order is determined based on the index of the minimum AIC, but generally it is also good to keep the parsimony principle in mind and test whether the decrease in AIC relatively to the last order is sufficient to add another coefficient to the model.
+paste("AIC is minimal for order",which.min(arima_vec))
+
+#The function auto.arima provides an efficient approach to select the optimal order 
+auto.arima(AR_2,max.q=0)
+```
+
+## Estimation of time series coefficients
+
+In this section it will be used as a given that the order of the time series is known.
+The estimation of AR coefficients can be done by using a least squares regression as can be seen below.
+
+```{r}
+#Data generation
+phi=c(0.5,0.3)
+sigma=1
+set.seed(1001)
+AR_2<-arima.sim(n=10000,list(ar=phi),sd=sigma)
+AR2_fit<-lm(AR_2[3:length(AR_2)]~AR_2[2:(length(AR_2)-1)]+AR_2[1:(length(AR_2)-2)])
+paste("Phi_1 estimate is:",round(as.numeric(AR2_fit$coefficients[2]),3),"Phi_2 estimate is",round(as.numeric(AR2_fit$coefficients[3]),3))
+```
+
+Another approach is to use the Yule Walker method to estimate AR coefficients.
+
+```{r}
+#Data generation
+phi=c(0.6,0.4,-0.2)
+sigma=2
+set.seed(1001)
+AR_3<-arima.sim(n=10000,list(ar=phi),sd=sigma)
+
+#Estimation of coefficients
+#Construct Yule Walker matrix first
+b=acf(AR_3,plot=FALSE)[[1]][2:4]
+R=matrix(1,3,3)
+R[1,2]=b[1]
+R[2,3]=b[1]
+R[2,1]=b[1]
+R[3,2]=b[1]
+R[1,3]=b[2]
+R[3,1]=b[2]
+
+phi_est=solve(R,b)
+print(phi_est)
+
+#Compare with the ar() function in r
+ar(AR_3)
+```
+
+Estimation for the coefficients of an MA series is less straightforward.
+...
+
+## Ljung-Box Q statistic
+
+The Ljung-Box Q statistic can be used to test whether several autocorrelation terms are non-zero. It can be useful in determining and testing the orders of autocorrelation.
+
+```{r}
+#Test shows there is autocorrelation
+Box.test(AR_2)
+
+#White noise process, test shows no autocorrelation
+noise=rnorm(100)
+Box.test(noise)
+
+#This test can be used in order to test whether the residuals contain autocorrelation, in model building we would like the residuals to follow a white noise process and not emit any autocorrelation.
+```
+
+## SARIMA
+
+SARIMA stands for Seasonal ARIMA and is an extension in order to incorporate for seasonality. In SARIMA the sumber of parameters are doubled in that a additional parameters that ARIMA also contains (orders for autoregression and moving average and order of difference) but now for seasonal components.
+
+## Exponential smoothing
+
+(Exponential) smoothing provides another possible approach to time series analysis that is simpler and more pragmatic.
+
+Below we will perform a Smooth Exponential Smoothing (SSE) on self-generated data. 
+
+```{r}
+require(stats)
+
+#Generate a time series using geometric weights
+set.seed(1001)
+eps<-rnorm(100)
+w=0.2
+xs=1+c(eps[1],eps[2])
+
+for(i in 3:100){
+  xs[i]=w*xs[i-1]+(1-w)*xs[i-1]+eps[i]
+}
+
+#HoltWinters function in the stats package contains the SSE procedure
+HoltWinters(ts(xs),beta=FALSE,gamma=FALSE)
+
+#Plot outcomes fit is slightly increased to make it distinguishable from the data
+plot(ts(xs),main="SSE procedure example")
+lines(HoltWinters(ts(xs),beta=FALSE,gamma=FALSE)$x+0.1,col="red")
+
+#Similarly we can add a trend and seasonality using the HoltWinters function
+#plot(ts(xs),main="SSE procedure example")
+#lines(HoltWinters(ts(xs))$x+0.1,col="red")
+
+#Holtwinters can be used for future forecasts, here we can see that addition of a trend and seasonality leads to different forecasts. Note that in case of only a level component all future forecasts are equal.
+predict(HoltWinters(ts(xs),beta=FALSE,gamma=FALSE),4)
+#Addition of a level term (in this case a positive trend) leads to increasing forecasts.
+predict(HoltWinters(ts(xs),gamma=FALSE),4)
+```
+
+##Dataset analyses
+
+### Bev dataset: PACF analysis
+
+```{r}
+data(bev)
+bev_MA=filter(bev,rep(1/31,31),sides=2)
+Y=bev/bev_MA
+
+par(mfrow=c(3,1))
+plot(bev,main="Beveridge Wheat Price")
+lines(bev_MA,col="red")
+acf(na.omit(Y),type="partial",main="PACF")
+
+#Note PACF gives that the order of this MA process is 2, similar to the ar function.
+ar(na.omit(Y),order.max=5)
+
+```
+
+### Recruitment and jj datasets: Fitting AR models
+
+In fitting (time series) models it is important to keep the parsimony principle in mind, which says to use the simplest explanation that fits the evidence. 
+
+```{r}
+#1. Recruitment data ('rec' from 'astsa' package)
+
+#Note that the PACF only seems to give two significant lags, so an AR(2) model seems to be appropriate to use
+acf(rec,type="partial")
+
+#The r function ar() is used rather than implementing the Yule Walker approach as was done earlier
+phi_est_rec=ar(rec,order.max=2)[[2]]
+var_est_rec=ar(rec,order.max=2)[[3]]
+
+#Estimation of the intercept
+int_est_rec=mean(rec)*(1-sum(phi_est_rec))
+
+#The estimation gives the following outcomes:
+cat("Intercept:",round(int_est_rec,3),"Lag coefficients",round(phi_est_rec,3),"Variance estimate",round(var_est_rec,3))
+
+#The estimated model is (using two decimal places) X_t=7.03+1.33*X_{t-1}-0.44*X_{t-2}+N(0,0.95)
+
+#2. Johnson & Johnson data ('jj' from 'astsa' package)
+
+#The data is not stationary, so the log returns of the data will be examined, while also the mean of the data will be substracted.
+jj_log_return=diff(log(jj))
+jj_log_return_zm<-jj_log_return-mean(jj_log_return)
+
+#pacf seems to give four significant lags
+pacf(jj_log_return_zm)
+
+#
+phi_est_jj=ar(jj_log_return_zm,order.max=4)[[2]]
+var_est_jj=ar(jj_log_return_zm,order.max=4)[[3]]
+
+#Estimation of the intercept
+int_est_jj=mean(jj_log_return)*(1-sum(phi_est_jj))
+
+#The estimation gives the following outcomes:
+cat("Intercept:",round(int_est_jj,3),"Lag coefficients",round(phi_est_jj,3),"Variance estimate",round(var_est_jj,3))
+
+```
+
+### Daily birth dataset: Fitting ARMA model
+
+```{r}
+#Import data
+cal_births<-read.csv("cal_births.csv",header = TRUE)
+
+#Format the data
+names(cal_births)<-c("Date","Births")
+cal_births$Date<-as.Date(cal_births$Date,"%m/%d/%Y")
+
+#Plot data
+plot(Births~Date,data=cal_births,type="l",xlab="Date",ylab="Number of births",main="Daily female births in California 1959 ")
+
+#We see indications of non-stationarity, so we will difference the series
+Births<-cal_births$Births
+plot(cal_births$Date[1:(nrow(cal_births)-1)],diff(Births),type="l",main="Differenced births dataset")
+
+#Ljung-Box test shows autocorrelation
+Box.test(diff(cal_births$Births))
+
+#Plot acf and pacf: shows 1 and up to 7 significant lags respectively. 
+acf(diff(Births))
+pacf(diff(Births))
+
+#Assess models from AIC
+aic_vector_0<-c()
+aic_vector_1<-c()
+aic_vector_2<-c()
+
+#
+for(i in 1:8){
+  aic_vector_0<-c(aic_vector_0,arima(Births,c((i-1),1,0))$aic)
+  aic_vector_1<-c(aic_vector_1,arima(Births,c((i-1),1,1))$aic)
+  aic_vector_2<-c(aic_vector_2,arima(Births,c((i-1),1,2))$aic)
+}
+
+#From the aic the choice for p=1,d=1,m=1 seems to be optimal
+print(aic_vector_0)
+print(aic_vector_0)
+print(aic_vector_0)
+
+#Now use the sarima function in the astsa package, which is a very comprehensive function that gives a lot of information as can be seen below.
+sarima(Births,1,1,1,0,0,0)
+```
+
+### JJ dataset: Fitting SARIMA model
+
+```{r}
+require(astsa)
+require(forecast)
+
+#We have already seen that the jj dataset contains seasonality
+plot(diff(log(jj)),main="Log returns in jj dataset")
+
+#The acf shows that the data is significantly correlated to past data with lag 4
+acf(diff(log(jj)))
+
+#We want to get rid of the periodic behavior in the dataset by seasonal differencing.
+plot(diff(diff(log(jj)),4),main="Seasonal differenced jj log returns")
+
+#Let's plot the acf and pacf to see what components should be included in the model.
+#We can see that we possibly have an AR and MA component with lag 1, while we also might have a seasonal component with lag 1 with a periodicity of 4.
+acf(diff(diff(log(jj)),4))
+pacf(diff(diff(log(jj)),4))
+
+#From examining different parameter inputs, we obtain the following optimal aic
+arima(log(jj),order=c(0,1,1),seasonal=list(order=c(1,1,0),period=4))$aic
+
+#There is no autocorrelation in the residuals
+acf(arima(log(jj),order=c(0,1,1),seasonal=list(order=c(1,1,0),period=4))$res)
+
+#Use the sarima routine
+sarima(log(jj),0,1,1,1,1,0,4)
+
+#Forecast the model
+model<- arima(x=log(jj), order = c(0,1,1), seasonal=list(order=c(1,1,0), period=4))
+plot(forecast(model),main="forecast jj model")
+```
+
+### AirPassengers dataset: Exponential smoothing
+
+```{r}
+require("datasets")
+#This dataset contains data on number of airline passengers, it concerns monthly data.
+data("AirPassengers")
+HW_mod<-HoltWinters(log10(AirPassengers))
+
+#Obtain coefficients: See that the highest seasonality effect is seen in the summer, which should be intuitive.
+HW_mod$coefficients
+
+#Make a forecast for January 1961
+predict(HW_mod,1)
+
+#Make a plot
+require("forecast")
+plot(forecast(HW_mod))
+```
+
+## Main References
+
+* Practical time series analysis, The State University of New York (Coursera)
+* Time series analysis and its applications with R examples (Third edition), R Shumway and D Stoffer
+* Various packages and corresponding documentation listed used in the above analyses (forecast, datasets, stats, astsa etc)
